@@ -2,6 +2,7 @@ package errors
 
 import (
 	"encoding/json"
+	"gpt-load/internal/utils"
 	"strings"
 )
 
@@ -38,7 +39,7 @@ func ParseUpstreamError(body []byte) string {
 	var stdErr standardErrorResponse
 	if err := json.Unmarshal(body, &stdErr); err == nil {
 		if msg := strings.TrimSpace(stdErr.Error.Message); msg != "" {
-			return truncateString(msg, maxErrorBodyLength)
+			return utils.TruncateString(msg, maxErrorBodyLength)
 		}
 	}
 
@@ -46,7 +47,7 @@ func ParseUpstreamError(body []byte) string {
 	var vendorErr vendorErrorResponse
 	if err := json.Unmarshal(body, &vendorErr); err == nil {
 		if msg := strings.TrimSpace(vendorErr.ErrorMsg); msg != "" {
-			return truncateString(msg, maxErrorBodyLength)
+			return utils.TruncateString(msg, maxErrorBodyLength)
 		}
 	}
 
@@ -54,7 +55,7 @@ func ParseUpstreamError(body []byte) string {
 	var simpleErr simpleErrorResponse
 	if err := json.Unmarshal(body, &simpleErr); err == nil {
 		if msg := strings.TrimSpace(simpleErr.Error); msg != "" {
-			return truncateString(msg, maxErrorBodyLength)
+			return utils.TruncateString(msg, maxErrorBodyLength)
 		}
 	}
 
@@ -62,18 +63,10 @@ func ParseUpstreamError(body []byte) string {
 	var rootMsgErr rootMessageErrorResponse
 	if err := json.Unmarshal(body, &rootMsgErr); err == nil {
 		if msg := strings.TrimSpace(rootMsgErr.Message); msg != "" {
-			return truncateString(msg, maxErrorBodyLength)
+			return utils.TruncateString(msg, maxErrorBodyLength)
 		}
 	}
 
 	// 5. Graceful Degradation: If all parsing fails, return the raw (but safe) body.
-	return truncateString(string(body), maxErrorBodyLength)
-}
-
-// truncateString ensures a string does not exceed a maximum length.
-func truncateString(s string, maxLength int) string {
-	if len(s) > maxLength {
-		return s[:maxLength]
-	}
-	return s
+	return utils.TruncateString(string(body), maxErrorBodyLength)
 }

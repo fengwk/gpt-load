@@ -36,6 +36,8 @@ type ProxyServer struct {
 	encryptionSvc     encryption.Service
 }
 
+const maxRequestBodyLogBytes = 1_000_000
+
 // NewProxyServer creates a new proxy server
 func NewProxyServer(
 	keyProvider *keypool.KeyProvider,
@@ -244,7 +246,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 			requestType = models.RequestTypeFinal
 		}
 
-		ps.logRequest(c, originalGroup, group, apiKey, startTime, statusCode, errors.New(parsedError), isStream, upstreamURL, channelHandler, bodyBytes, requestType)
+		ps.logRequest(c, originalGroup, group, apiKey, startTime, statusCode, errors.New(parsedError), isStream, upstreamURL, channelHandler, finalBodyBytes, requestType)
 
 		// 如果是最后一次尝试，直接返回错误，不再递归
 		if isLastAttempt {
@@ -282,7 +284,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 		}
 	}
 
-	ps.logRequest(c, originalGroup, group, apiKey, startTime, resp.StatusCode, nil, isStream, upstreamURL, channelHandler, bodyBytes, models.RequestTypeFinal)
+	ps.logRequest(c, originalGroup, group, apiKey, startTime, resp.StatusCode, nil, isStream, upstreamURL, channelHandler, finalBodyBytes, models.RequestTypeFinal)
 }
 
 func shouldFailoverOnStatusCode(statusCode int, group *models.Group) bool {
@@ -314,15 +316,15 @@ func (ps *ProxyServer) logRequest(
 	var requestBodyToLog, userAgent string
 
 	if group.EffectiveConfig.EnableRequestBodyLogging {
-		requestBodyToLog = utils.TruncateString(string(bodyBytes), 65000)
-		userAgent = c.Request.UserAgent()
+		requestBodyToLog = utils.TruncateString(string(bodyBytes), maxRequestBodyLogBytes)
+		userAgent = utils.TruncateString(c.Request.UserAgent(), 512)
 	}
 
 	duration := time.Since(startTime).Milliseconds()
 
 	logEntry := &models.RequestLog{
 		GroupID:      group.ID,
-		GroupName:    group.Name,
+		GroupName:    utils.TruncateString(group.Name, 255),
 		IsSuccess:    finalError == nil && statusCode < 400,
 		SourceIP:     c.ClientIP(),
 		StatusCode:   statusCode,
@@ -338,11 +340,11 @@ func (ps *ProxyServer) logRequest(
 	// Set parent group
 	if originalGroup != nil && originalGroup.GroupType == "aggregate" && originalGroup.ID != group.ID {
 		logEntry.ParentGroupID = originalGroup.ID
-		logEntry.ParentGroupName = originalGroup.Name
+		logEntry.ParentGroupName = utils.TruncateString(originalGroup.Name, 255)
 	}
 
 	if channelHandler != nil && bodyBytes != nil {
-		logEntry.Model = channelHandler.ExtractModel(c, bodyBytes)
+		logEntry.Model = utils.TruncateString(channelHandler.ExtractModel(c, bodyBytes), 255)
 	}
 
 	if apiKey != nil {
@@ -359,7 +361,7 @@ func (ps *ProxyServer) logRequest(
 	}
 
 	if finalError != nil {
-		logEntry.ErrorMessage = finalError.Error()
+		logEntry.ErrorMessage = utils.NormalizeUTF8(finalError.Error())
 	}
 
 	if err := ps.requestLogService.Record(logEntry); err != nil {

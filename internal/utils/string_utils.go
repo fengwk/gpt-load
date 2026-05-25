@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // MaskAPIKey masks an API key for safe logging.
@@ -16,10 +17,25 @@ func MaskAPIKey(key string) string {
 
 // TruncateString shortens a string to a maximum length.
 func TruncateString(s string, maxLength int) string {
-	if len(s) > maxLength {
-		return s[:maxLength]
+	if maxLength <= 0 {
+		return ""
 	}
-	return s
+
+	s = NormalizeUTF8(s)
+	if len(s) <= maxLength {
+		return s
+	}
+
+	for maxLength > 0 && !utf8.ValidString(s[:maxLength]) {
+		maxLength--
+	}
+
+	return s[:maxLength]
+}
+
+// NormalizeUTF8 replaces invalid UTF-8 byte sequences with the replacement rune.
+func NormalizeUTF8(s string) string {
+	return strings.ToValidUTF8(s, "\uFFFD")
 }
 
 // SplitAndTrim splits a string by a separator
