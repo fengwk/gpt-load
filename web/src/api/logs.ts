@@ -1,11 +1,15 @@
 import i18n from "@/locales";
-import type { ApiResponse, Group, LogFilter, LogsResponse } from "@/types/models";
+import type { ApiResponse, Group, LogFilter, LogsResponse, RequestLog } from "@/types/models";
 import http from "@/utils/http";
 
 export const logApi = {
   // 获取日志列表
   getLogs: (params: LogFilter): Promise<ApiResponse<LogsResponse>> => {
     return http.get("/logs", { params });
+  },
+
+  getLogDetail: (id: string): Promise<ApiResponse<RequestLog>> => {
+    return http.get(`/logs/${encodeURIComponent(id)}`);
   },
 
   // 获取分组列表（用于筛选）

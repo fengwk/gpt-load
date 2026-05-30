@@ -70,6 +70,7 @@ const totalPages = computed(() => Math.ceil(total.value / pageSize.value));
 // Modal for viewing request/response details
 const showDetailModal = ref(false);
 const selectedLog = ref<LogRow | null>(null);
+const detailLoading = ref(false);
 
 // Filters
 const filters = reactive({
@@ -96,6 +97,11 @@ const requestTypeOptions = [
   { label: t("logs.finalRequest"), value: "final" },
 ];
 
+const createLogRow = (log: RequestLog, isKeyVisible = false): LogRow => ({
+  ...log,
+  is_key_visible: isKeyVisible,
+});
+
 // Fetch data
 const loadLogs = async () => {
   loading.value = true;
@@ -121,7 +127,7 @@ const loadLogs = async () => {
 
     const res = await logApi.getLogs(params);
     if (res.code === 0 && res.data) {
-      logs.value = res.data.items.map(log => ({ ...log, is_key_visible: false }));
+      logs.value = res.data.items.map(log => createLogRow(log));
       total.value = res.data.pagination.total_items;
     } else {
       logs.value = [];
@@ -151,13 +157,29 @@ const toggleKeyVisibility = (row: LogRow) => {
   row.is_key_visible = !row.is_key_visible;
 };
 
-const viewLogDetails = (row: LogRow) => {
-  selectedLog.value = row;
+const viewLogDetails = async (row: LogRow) => {
+  const currentLogId = row.id;
+  selectedLog.value = createLogRow(row, row.is_key_visible);
   showDetailModal.value = true;
+
+  detailLoading.value = true;
+  try {
+    const res = await logApi.getLogDetail(currentLogId);
+    if (res.code === 0 && res.data && selectedLog.value?.id === currentLogId) {
+      selectedLog.value = createLogRow(res.data, selectedLog.value.is_key_visible);
+    }
+  } catch {
+    // Error messages are handled by the HTTP interceptor.
+  } finally {
+    if (selectedLog.value?.id === currentLogId) {
+      detailLoading.value = false;
+    }
+  }
 };
 
 const closeDetailModal = () => {
   showDetailModal.value = false;
+  detailLoading.value = false;
   selectedLog.value = null;
 };
 
@@ -724,206 +746,208 @@ const deselectAllColumns = () => {
       :title="t('logs.requestDetails')"
     >
       <div v-if="selectedLog" style="max-height: 65vh; overflow-y: auto">
-        <n-space vertical size="small">
-          <!-- 基本信息 -->
-          <n-card
-            :title="t('logs.basicInfo')"
-            size="small"
-            :header-style="{ padding: '8px 12px', fontSize: '13px' }"
-          >
-            <div class="detail-grid-compact">
-              <div class="detail-item-compact">
-                <span class="detail-label-compact">{{ t("logs.time") }}:</span>
-                <span class="detail-value-compact">
-                  {{ formatDateTime(selectedLog.timestamp) }}
-                </span>
-              </div>
-              <div class="detail-item-compact">
-                <span class="detail-label-compact">{{ t("common.status") }}:</span>
-                <n-tag :type="selectedLog.is_success ? 'success' : 'error'" size="small">
-                  {{ selectedLog.is_success ? t("common.success") : t("common.error") }} -
-                  {{ selectedLog.status_code }}
-                </n-tag>
-              </div>
-              <div class="detail-item-compact">
-                <span class="detail-label-compact">{{ t("logs.duration") }}:</span>
-                <span class="detail-value-compact">{{ selectedLog.duration_ms }}ms</span>
-              </div>
-              <div class="detail-item-compact">
-                <span class="detail-label-compact">{{ t("logs.parentGroup") }}:</span>
-                <span class="detail-value-compact">{{ selectedLog.parent_group_name || "-" }}</span>
-              </div>
-              <div class="detail-item-compact">
-                <span class="detail-label-compact">{{ t("logs.group") }}:</span>
-                <span class="detail-value-compact">{{ selectedLog.group_name }}</span>
-              </div>
-              <div class="detail-item-compact">
-                <span class="detail-label-compact">{{ t("logs.model") }}:</span>
-                <span class="detail-value-compact">{{ selectedLog.model }}</span>
-              </div>
-              <div class="detail-item-compact">
-                <span class="detail-label-compact">{{ t("logs.requestType") }}:</span>
-                <n-tag v-if="selectedLog.request_type === 'retry'" type="warning" size="small">
-                  {{ t("logs.retryRequest") }}
-                </n-tag>
-                <n-tag v-else type="default" size="small">{{ t("logs.finalRequest") }}</n-tag>
-              </div>
-              <div class="detail-item-compact">
-                <span class="detail-label-compact">{{ t("logs.responseType") }}:</span>
-                <n-tag :type="selectedLog.is_stream ? 'info' : 'default'" size="small">
-                  {{ selectedLog.is_stream ? t("logs.stream") : t("logs.nonStream") }}
-                </n-tag>
-              </div>
-              <div class="detail-item-compact">
-                <span class="detail-label-compact">{{ t("logs.sourceIP") }}:</span>
-                <span class="detail-value-compact">{{ selectedLog.source_ip || "-" }}</span>
-              </div>
-              <div class="detail-item-compact key-item">
-                <span class="detail-label-compact">{{ t("logs.key") }}:</span>
-                <div class="key-display-compact">
-                  <span class="key-value-compact">
-                    {{
-                      selectedLog.is_key_visible
-                        ? selectedLog.key_value || "-"
-                        : maskKey(selectedLog.key_value || "")
-                    }}
+        <n-spin :show="detailLoading">
+          <n-space vertical size="small">
+            <!-- 基本信息 -->
+            <n-card
+              :title="t('logs.basicInfo')"
+              size="small"
+              :header-style="{ padding: '8px 12px', fontSize: '13px' }"
+            >
+              <div class="detail-grid-compact">
+                <div class="detail-item-compact">
+                  <span class="detail-label-compact">{{ t("logs.time") }}:</span>
+                  <span class="detail-value-compact">
+                    {{ formatDateTime(selectedLog.timestamp) }}
                   </span>
-                  <div class="key-actions-compact">
-                    <n-button size="tiny" text @click="toggleKeyVisibility(selectedLog)">
-                      <template #icon>
-                        <n-icon
-                          :component="selectedLog.is_key_visible ? EyeOffOutline : EyeOutline"
-                        />
-                      </template>
-                    </n-button>
+                </div>
+                <div class="detail-item-compact">
+                  <span class="detail-label-compact">{{ t("common.status") }}:</span>
+                  <n-tag :type="selectedLog.is_success ? 'success' : 'error'" size="small">
+                    {{ selectedLog.is_success ? t("common.success") : t("common.error") }} -
+                    {{ selectedLog.status_code }}
+                  </n-tag>
+                </div>
+                <div class="detail-item-compact">
+                  <span class="detail-label-compact">{{ t("logs.duration") }}:</span>
+                  <span class="detail-value-compact">{{ selectedLog.duration_ms }}ms</span>
+                </div>
+                <div class="detail-item-compact">
+                  <span class="detail-label-compact">{{ t("logs.parentGroup") }}:</span>
+                  <span class="detail-value-compact">{{ selectedLog.parent_group_name || "-" }}</span>
+                </div>
+                <div class="detail-item-compact">
+                  <span class="detail-label-compact">{{ t("logs.group") }}:</span>
+                  <span class="detail-value-compact">{{ selectedLog.group_name }}</span>
+                </div>
+                <div class="detail-item-compact">
+                  <span class="detail-label-compact">{{ t("logs.model") }}:</span>
+                  <span class="detail-value-compact">{{ selectedLog.model }}</span>
+                </div>
+                <div class="detail-item-compact">
+                  <span class="detail-label-compact">{{ t("logs.requestType") }}:</span>
+                  <n-tag v-if="selectedLog.request_type === 'retry'" type="warning" size="small">
+                    {{ t("logs.retryRequest") }}
+                  </n-tag>
+                  <n-tag v-else type="default" size="small">{{ t("logs.finalRequest") }}</n-tag>
+                </div>
+                <div class="detail-item-compact">
+                  <span class="detail-label-compact">{{ t("logs.responseType") }}:</span>
+                  <n-tag :type="selectedLog.is_stream ? 'info' : 'default'" size="small">
+                    {{ selectedLog.is_stream ? t("logs.stream") : t("logs.nonStream") }}
+                  </n-tag>
+                </div>
+                <div class="detail-item-compact">
+                  <span class="detail-label-compact">{{ t("logs.sourceIP") }}:</span>
+                  <span class="detail-value-compact">{{ selectedLog.source_ip || "-" }}</span>
+                </div>
+                <div class="detail-item-compact key-item">
+                  <span class="detail-label-compact">{{ t("logs.key") }}:</span>
+                  <div class="key-display-compact">
+                    <span class="key-value-compact">
+                      {{
+                        selectedLog.is_key_visible
+                          ? selectedLog.key_value || "-"
+                          : maskKey(selectedLog.key_value || "")
+                      }}
+                    </span>
+                    <div class="key-actions-compact">
+                      <n-button size="tiny" text @click="toggleKeyVisibility(selectedLog)">
+                        <template #icon>
+                          <n-icon
+                            :component="selectedLog.is_key_visible ? EyeOffOutline : EyeOutline"
+                          />
+                        </template>
+                      </n-button>
+                      <n-button
+                        v-if="selectedLog.key_value"
+                        size="tiny"
+                        text
+                        @click="copyContent(selectedLog.key_value, 'API Key')"
+                      >
+                        <template #icon>
+                          <n-icon :component="CopyOutline" />
+                        </template>
+                      </n-button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </n-card>
+
+            <!-- 请求信息 (紧凑布局) -->
+            <n-card
+              :title="t('logs.requestInfo')"
+              size="small"
+              :header-style="{ padding: '8px 12px', fontSize: '13px' }"
+            >
+              <div class="compact-fields">
+                <div class="compact-field" v-if="selectedLog.request_path">
+                  <div class="compact-field-header">
+                    <span class="compact-field-title">{{ t("logs.requestPath") }}</span>
                     <n-button
-                      v-if="selectedLog.key_value"
                       size="tiny"
                       text
-                      @click="copyContent(selectedLog.key_value, 'API Key')"
+                      @click="copyContent(selectedLog.request_path, t('logs.requestPath'))"
                     >
                       <template #icon>
                         <n-icon :component="CopyOutline" />
                       </template>
                     </n-button>
                   </div>
+                  <div class="compact-field-content">
+                    {{ selectedLog.request_path }}
+                  </div>
+                </div>
+
+                <div class="compact-field" v-if="selectedLog.upstream_addr">
+                  <div class="compact-field-header">
+                    <span class="compact-field-title">{{ t("logs.upstreamAddress") }}</span>
+                    <n-button
+                      size="tiny"
+                      text
+                      @click="copyContent(selectedLog.upstream_addr, t('logs.upstreamAddress'))"
+                    >
+                      <template #icon>
+                        <n-icon :component="CopyOutline" />
+                      </template>
+                    </n-button>
+                  </div>
+                  <div class="compact-field-content">
+                    {{ selectedLog.upstream_addr }}
+                  </div>
+                </div>
+
+                <div class="compact-field" v-if="selectedLog.user_agent">
+                  <div class="compact-field-header">
+                    <span class="compact-field-title">User Agent</span>
+                    <n-button
+                      size="tiny"
+                      text
+                      @click="copyContent(selectedLog.user_agent, 'User Agent')"
+                    >
+                      <template #icon>
+                        <n-icon :component="CopyOutline" />
+                      </template>
+                    </n-button>
+                  </div>
+                  <div class="compact-field-content">
+                    {{ selectedLog.user_agent }}
+                  </div>
+                </div>
+
+                <div class="compact-field" v-if="selectedLog.request_body">
+                  <div class="compact-field-header">
+                    <span class="compact-field-title">{{ t("logs.requestContent") }}</span>
+                    <n-button
+                      size="tiny"
+                      text
+                      @click="
+                        copyContent(
+                          formatJsonString(selectedLog.request_body),
+                          t('logs.requestContent')
+                        )
+                      "
+                    >
+                      <template #icon>
+                        <n-icon :component="CopyOutline" />
+                      </template>
+                    </n-button>
+                  </div>
+                  <div class="compact-field-content">
+                    {{ formatJsonString(selectedLog.request_body) }}
+                  </div>
                 </div>
               </div>
-            </div>
-          </n-card>
+            </n-card>
 
-          <!-- 请求信息 (紧凑布局) -->
-          <n-card
-            :title="t('logs.requestInfo')"
-            size="small"
-            :header-style="{ padding: '8px 12px', fontSize: '13px' }"
-          >
-            <div class="compact-fields">
-              <div class="compact-field" v-if="selectedLog.request_path">
-                <div class="compact-field-header">
-                  <span class="compact-field-title">{{ t("logs.requestPath") }}</span>
-                  <n-button
-                    size="tiny"
-                    text
-                    @click="copyContent(selectedLog.request_path, t('logs.requestPath'))"
-                  >
-                    <template #icon>
-                      <n-icon :component="CopyOutline" />
-                    </template>
-                  </n-button>
-                </div>
+            <!-- 错误信息 -->
+            <n-card
+              v-if="selectedLog.error_message"
+              :title="t('logs.errorInfo')"
+              size="small"
+              :header-style="{ padding: '8px 12px', fontSize: '13px' }"
+            >
+              <template #header-extra>
+                <n-button
+                  size="tiny"
+                  text
+                  ghost
+                  @click="copyContent(selectedLog.error_message, t('logs.errorMessage'))"
+                >
+                  <template #icon>
+                    <n-icon :component="CopyOutline" />
+                  </template>
+                </n-button>
+              </template>
+              <div class="compact-field compact-field-error">
                 <div class="compact-field-content">
-                  {{ selectedLog.request_path }}
+                  {{ selectedLog.error_message }}
                 </div>
               </div>
-
-              <div class="compact-field" v-if="selectedLog.upstream_addr">
-                <div class="compact-field-header">
-                  <span class="compact-field-title">{{ t("logs.upstreamAddress") }}</span>
-                  <n-button
-                    size="tiny"
-                    text
-                    @click="copyContent(selectedLog.upstream_addr, t('logs.upstreamAddress'))"
-                  >
-                    <template #icon>
-                      <n-icon :component="CopyOutline" />
-                    </template>
-                  </n-button>
-                </div>
-                <div class="compact-field-content">
-                  {{ selectedLog.upstream_addr }}
-                </div>
-              </div>
-
-              <div class="compact-field" v-if="selectedLog.user_agent">
-                <div class="compact-field-header">
-                  <span class="compact-field-title">User Agent</span>
-                  <n-button
-                    size="tiny"
-                    text
-                    @click="copyContent(selectedLog.user_agent, 'User Agent')"
-                  >
-                    <template #icon>
-                      <n-icon :component="CopyOutline" />
-                    </template>
-                  </n-button>
-                </div>
-                <div class="compact-field-content">
-                  {{ selectedLog.user_agent }}
-                </div>
-              </div>
-
-              <div class="compact-field" v-if="selectedLog.request_body">
-                <div class="compact-field-header">
-                  <span class="compact-field-title">{{ t("logs.requestContent") }}</span>
-                  <n-button
-                    size="tiny"
-                    text
-                    @click="
-                      copyContent(
-                        formatJsonString(selectedLog.request_body),
-                        t('logs.requestContent')
-                      )
-                    "
-                  >
-                    <template #icon>
-                      <n-icon :component="CopyOutline" />
-                    </template>
-                  </n-button>
-                </div>
-                <div class="compact-field-content">
-                  {{ formatJsonString(selectedLog.request_body) }}
-                </div>
-              </div>
-            </div>
-          </n-card>
-
-          <!-- 错误信息 -->
-          <n-card
-            v-if="selectedLog.error_message"
-            :title="t('logs.errorInfo')"
-            size="small"
-            :header-style="{ padding: '8px 12px', fontSize: '13px' }"
-          >
-            <template #header-extra>
-              <n-button
-                size="tiny"
-                text
-                ghost
-                @click="copyContent(selectedLog.error_message, t('logs.errorMessage'))"
-              >
-                <template #icon>
-                  <n-icon :component="CopyOutline" />
-                </template>
-              </n-button>
-            </template>
-            <div class="compact-field compact-field-error">
-              <div class="compact-field-content">
-                {{ selectedLog.error_message }}
-              </div>
-            </div>
-          </n-card>
-        </n-space>
+            </n-card>
+          </n-space>
+        </n-spin>
       </div>
       <template #footer>
         <n-space justify="end">
