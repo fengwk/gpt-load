@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"gpt-load/internal/channel"
@@ -97,8 +96,9 @@ func (ps *ProxyServer) HandleProxy(c *gin.Context) {
 		return
 	}
 
-	bodyBytes, err := ps.readRequestBody(c)
+	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
+		logrus.Errorf("Failed to read request body: %v", err)
 		response.Error(c, app_errors.NewAPIError(app_errors.ErrBadRequest, "Failed to read request body"))
 		return
 	}
@@ -113,50 +113,6 @@ func (ps *ProxyServer) HandleProxy(c *gin.Context) {
 	isStream := channelHandler.IsStreamRequest(c, bodyBytes)
 
 	ps.executeRequestWithRetry(c, channelHandler, originalGroup, group, finalBodyBytes, isStream, startTime, 0)
-}
-
-func (ps *ProxyServer) readRequestBody(c *gin.Context) ([]byte, error) {
-	startTime := time.Now()
-	if c.Request.Body == nil {
-		return nil, nil
-	}
-
-	var bodyBuffer bytes.Buffer
-	bytesRead, err := io.Copy(&bodyBuffer, c.Request.Body)
-	if err != nil {
-		fields := logrus.Fields{
-			"method":            c.Request.Method,
-			"path":              c.Request.URL.Path,
-			"query":             c.Request.URL.RawQuery,
-			"content_length":    c.Request.ContentLength,
-			"bytes_read":        bytesRead,
-			"duration_ms":       time.Since(startTime).Milliseconds(),
-			"remote_addr":       c.Request.RemoteAddr,
-			"client_ip":         c.ClientIP(),
-			"user_agent":        utils.TruncateString(c.Request.UserAgent(), 256),
-			"transfer_encoding": strings.Join(c.Request.TransferEncoding, ","),
-		}
-
-		if ctxErr := c.Request.Context().Err(); ctxErr != nil {
-			fields["request_context_error"] = ctxErr.Error()
-		}
-		if c.Request.ContentLength >= 0 {
-			fields["bytes_missing"] = c.Request.ContentLength - bytesRead
-		}
-
-		logrus.WithError(err).WithFields(fields).Error("Failed to read request body")
-		return nil, err
-	}
-
-	logrus.WithFields(logrus.Fields{
-		"method":         c.Request.Method,
-		"path":           c.Request.URL.Path,
-		"content_length": c.Request.ContentLength,
-		"bytes_read":     bytesRead,
-		"duration_ms":    time.Since(startTime).Milliseconds(),
-	}).Debug("Read request body successfully")
-
-	return bodyBuffer.Bytes(), nil
 }
 
 // executeRequestWithRetry is the core recursive function for handling requests and retries.
