@@ -14,8 +14,16 @@ import (
 
 // SubGroupInput defines the input payload for aggregate group member configuration.
 type SubGroupInput struct {
-	GroupID uint `json:"group_id"`
-	Weight  int  `json:"weight"`
+	GroupID     uint     `json:"group_id"`
+	Weight      int      `json:"weight"`
+	RouteModels []string `json:"route_models"`
+}
+
+// SubGroupUpdateInput defines the complete configuration for an existing
+// aggregate group association.
+type SubGroupUpdateInput struct {
+	Weight      int
+	RouteModels []string
 }
 
 // AggregateValidationResult captures the normalized aggregate group parameters.
@@ -44,6 +52,7 @@ func (s *AggregateGroupService) ValidateSubGroups(ctx context.Context, channelTy
 		return nil, NewI18nError(app_errors.ErrValidation, "validation.sub_groups_required", nil)
 	}
 
+	normalizedInputs := make([]SubGroupInput, 0, len(inputs))
 	subGroupIDs := make([]uint, 0, len(inputs))
 	for _, input := range inputs {
 		if input.GroupID == 0 {
@@ -55,6 +64,8 @@ func (s *AggregateGroupService) ValidateSubGroups(ctx context.Context, channelTy
 		if input.Weight > 1000 {
 			return nil, NewI18nError(app_errors.ErrValidation, "validation.sub_group_weight_max_exceeded", nil)
 		}
+		input.RouteModels = models.NormalizeModelList(input.RouteModels)
+		normalizedInputs = append(normalizedInputs, input)
 		subGroupIDs = append(subGroupIDs, input.GroupID)
 	}
 
@@ -93,13 +104,14 @@ func (s *AggregateGroupService) ValidateSubGroups(ctx context.Context, channelTy
 	}
 
 	resultSubGroups := make([]models.GroupSubGroup, 0, len(inputs))
-	for _, input := range inputs {
+	for _, input := range normalizedInputs {
 		if _, ok := subGroupMap[input.GroupID]; !ok {
 			return nil, NewI18nError(app_errors.ErrValidation, "validation.sub_group_not_found", nil)
 		}
 		resultSubGroups = append(resultSubGroups, models.GroupSubGroup{
-			SubGroupID: input.GroupID,
-			Weight:     input.Weight,
+			SubGroupID:  input.GroupID,
+			Weight:      input.Weight,
+			RouteModels: models.EncodeModelList(input.RouteModels),
 		})
 	}
 
@@ -133,11 +145,11 @@ func (s *AggregateGroupService) GetSubGroups(ctx context.Context, groupID uint) 
 	}
 
 	subGroupIDs := make([]uint, 0, len(groupSubGroups))
-	weightMap := make(map[uint]int, len(groupSubGroups))
+	subGroupMap := make(map[uint]models.GroupSubGroup, len(groupSubGroups))
 
 	for _, gsg := range groupSubGroups {
 		subGroupIDs = append(subGroupIDs, gsg.SubGroupID)
-		weightMap[gsg.SubGroupID] = gsg.Weight
+		subGroupMap[gsg.SubGroupID] = gsg
 	}
 
 	var subGroupModels []models.Group
@@ -150,6 +162,7 @@ func (s *AggregateGroupService) GetSubGroups(ctx context.Context, groupID uint) 
 	subGroups := make([]models.SubGroupInfo, 0, len(subGroupModels))
 	for _, subGroup := range subGroupModels {
 		stats := keyStatsMap[subGroup.ID]
+		relation := subGroupMap[subGroup.ID]
 
 		if stats.Err != nil {
 			logrus.WithContext(ctx).WithError(stats.Err).
@@ -159,7 +172,8 @@ func (s *AggregateGroupService) GetSubGroups(ctx context.Context, groupID uint) 
 
 		subGroups = append(subGroups, models.SubGroupInfo{
 			Group:       subGroup,
-			Weight:      weightMap[subGroup.ID],
+			Weight:      relation.Weight,
+			RouteModels: models.DecodeModelList(relation.RouteModels),
 			TotalKeys:   stats.TotalKeys,
 			ActiveKeys:  stats.ActiveKeys,
 			InvalidKeys: stats.InvalidKeys,
@@ -240,8 +254,59 @@ func (s *AggregateGroupService) AddSubGroups(ctx context.Context, groupID uint, 
 	return nil
 }
 
-// UpdateSubGroupWeight updates the weight of a specific sub group
+// UpdateSubGroupWeight updates only the weight of a specific sub group,
+// preserving its existing route configuration for old clients.
 func (s *AggregateGroupService) UpdateSubGroupWeight(ctx context.Context, groupID, subGroupID uint, weight int) error {
+	var group models.Group
+	if err := s.db.WithContext(ctx).First(&group, groupID).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return NewI18nError(app_errors.ErrResourceNotFound, "group.not_found", nil)
+		}
+		return err
+	}
+	if group.GroupType != "aggregate" {
+		return NewI18nError(app_errors.ErrBadRequest, "group.not_aggregate", nil)
+	}
+	if weight < 0 {
+		return NewI18nError(app_errors.ErrValidation, "validation.sub_group_weight_negative", nil)
+	}
+	if weight > 1000 {
+		return NewI18nError(app_errors.ErrValidation, "validation.sub_group_weight_max_exceeded", nil)
+	}
+
+	var existingRecord models.GroupSubGroup
+	if err := s.db.WithContext(ctx).
+		Where("group_id = ? AND sub_group_id = ?", groupID, subGroupID).
+		First(&existingRecord).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return NewI18nError(app_errors.ErrResourceNotFound, "group.sub_group_not_found", nil)
+		}
+		return err
+	}
+
+	result := s.db.WithContext(ctx).
+		Model(&models.GroupSubGroup{}).
+		Where("group_id = ? AND sub_group_id = ?", groupID, subGroupID).
+		Updates(map[string]any{"weight": weight})
+	if result.Error != nil {
+		return result.Error
+	}
+
+	// 触发缓存更新
+	if err := s.groupManager.Invalidate(); err != nil {
+		logrus.WithContext(ctx).WithError(err).Error("failed to invalidate group cache after updating sub group weight")
+	}
+
+	return nil
+}
+
+// UpdateSubGroupConfig updates the complete configuration of a specific
+// aggregate group association.
+func (s *AggregateGroupService) UpdateSubGroupConfig(
+	ctx context.Context,
+	groupID, subGroupID uint,
+	input SubGroupUpdateInput,
+) error {
 	var group models.Group
 	if err := s.db.WithContext(ctx).First(&group, groupID).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -254,15 +319,16 @@ func (s *AggregateGroupService) UpdateSubGroupWeight(ctx context.Context, groupI
 		return NewI18nError(app_errors.ErrBadRequest, "group.not_aggregate", nil)
 	}
 
-	if weight < 0 {
+	if input.Weight < 0 {
 		return NewI18nError(app_errors.ErrValidation, "validation.sub_group_weight_negative", nil)
 	}
 
-	if weight > 1000 {
+	if input.Weight > 1000 {
 		return NewI18nError(app_errors.ErrValidation, "validation.sub_group_weight_max_exceeded", nil)
 	}
 
-	// 检查子分组关联是否存在
+	routeModels := models.NormalizeModelList(input.RouteModels)
+
 	var existingRecord models.GroupSubGroup
 	if err := s.db.WithContext(ctx).Where("group_id = ? AND sub_group_id = ?", groupID, subGroupID).First(&existingRecord).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -274,19 +340,18 @@ func (s *AggregateGroupService) UpdateSubGroupWeight(ctx context.Context, groupI
 	result := s.db.WithContext(ctx).
 		Model(&models.GroupSubGroup{}).
 		Where("group_id = ? AND sub_group_id = ?", groupID, subGroupID).
-		Update("weight", weight)
+		Updates(map[string]any{
+			"weight":       input.Weight,
+			"route_models": models.EncodeModelList(routeModels),
+		})
 
 	if result.Error != nil {
 		return result.Error
 	}
 
-	if result.RowsAffected == 0 {
-		return NewI18nError(app_errors.ErrResourceNotFound, "group.sub_group_not_found", nil)
-	}
-
 	// 触发缓存更新
 	if err := s.groupManager.Invalidate(); err != nil {
-		logrus.WithContext(ctx).WithError(err).Error("failed to invalidate group cache after updating sub group weight")
+		logrus.WithContext(ctx).WithError(err).Error("failed to invalidate group cache after updating sub group configuration")
 	}
 
 	return nil

@@ -43,12 +43,20 @@ export interface HeaderRule {
 export interface SubGroupConfig {
   group_id: number;
   weight: number;
+  route_models: string[];
+}
+
+// 子分组关联完整更新配置
+export interface SubGroupUpdateConfig {
+  weight: number;
+  route_models: string[];
 }
 
 // 子分组信息（展示时使用）
 export interface SubGroupInfo {
   group: Group;
   weight: number;
+  route_models: string[];
   total_keys: number;
   active_keys: number;
   invalid_keys: number;

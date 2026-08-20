@@ -258,6 +258,23 @@ function formatNumber(num: number): string {
               </div>
             </div>
 
+            <!-- 模型路由规则 -->
+            <div class="model-rules-display">
+              <div class="model-rule-row">
+                <span class="model-rule-label">{{ t("subGroups.routeModels") }}</span>
+                <div v-if="subGroup.route_models?.length" class="model-tags">
+                  <n-tag
+                    v-for="model in subGroup.route_models"
+                    :key="`route-${model}`"
+                    size="small"
+                  >
+                    {{ model }}
+                  </n-tag>
+                </div>
+                <span v-else class="model-rule-empty">-</span>
+              </div>
+            </div>
+
             <!-- 密钥统计 -->
             <div class="key-stats-row">
               <div class="stats-left">
@@ -351,7 +368,7 @@ function formatNumber(num: number): string {
                   type="info"
                   size="tiny"
                   @click="openEditModal(subGroup)"
-                  :title="t('subGroups.editWeight')"
+                  :title="t('subGroups.editConfig')"
                 >
                   <template #icon>
                     <n-icon :component="CreateOutline" />
@@ -711,6 +728,40 @@ function formatNumber(num: number): string {
   font-size: 14px;
   min-width: 40px;
   text-align: right;
+}
+
+.model-rules-display {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+  min-width: 0;
+}
+
+.model-rule-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.model-rule-label {
+  flex: 0 0 58px;
+  color: var(--text-secondary);
+  line-height: 24px;
+}
+
+.model-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.model-rule-empty {
+  color: var(--text-tertiary);
+  line-height: 24px;
 }
 
 /* Key stats row styles */

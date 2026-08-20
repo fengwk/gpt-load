@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"gpt-load/internal/models"
 	"gpt-load/internal/store"
+	"sort"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/sirupsen/logrus"
@@ -22,6 +25,7 @@ type subGroupItem struct {
 	subGroupID    uint
 	weight        int
 	currentWeight int
+	routeModels   map[string]struct{}
 }
 
 // NewSubGroupManager creates a new sub-group manager service
@@ -33,7 +37,7 @@ func NewSubGroupManager(store store.Store) *SubGroupManager {
 }
 
 // SelectSubGroup selects an appropriate sub-group for the given aggregate group
-func (m *SubGroupManager) SelectSubGroup(group *models.Group) (string, error) {
+func (m *SubGroupManager) SelectSubGroup(group *models.Group, requestModel string) (string, error) {
 	if group.GroupType != "aggregate" {
 		return "", nil
 	}
@@ -43,7 +47,7 @@ func (m *SubGroupManager) SelectSubGroup(group *models.Group) (string, error) {
 		return "", fmt.Errorf("no valid sub-groups available for aggregate group '%s'", group.Name)
 	}
 
-	selectedName := selector.selectNext()
+	selectedName := selector.selectNext(requestModel)
 	if selectedName == "" {
 		return "", fmt.Errorf("no sub-groups with active keys for aggregate group '%s'", group.Name)
 	}
@@ -113,10 +117,10 @@ func (m *SubGroupManager) createSelector(group *models.Group) *selector {
 	var items []subGroupItem
 	for _, sg := range group.SubGroups {
 		items = append(items, subGroupItem{
-			name:          sg.SubGroupName,
-			subGroupID:    sg.SubGroupID,
-			weight:        sg.Weight,
-			currentWeight: 0,
+			name:        sg.SubGroupName,
+			subGroupID:  sg.SubGroupID,
+			weight:      sg.Weight,
+			routeModels: modelSet(models.DecodeModelList(sg.RouteModels)),
 		})
 	}
 
@@ -128,6 +132,7 @@ func (m *SubGroupManager) createSelector(group *models.Group) *selector {
 		groupID:   group.ID,
 		groupName: group.Name,
 		subGroups: items,
+		states:    make(map[string]*selectionState),
 		store:     m.store,
 	}
 }
@@ -137,33 +142,40 @@ type selector struct {
 	groupID   uint
 	groupName string
 	subGroups []subGroupItem
+	states    map[string]*selectionState
 	store     store.Store
 	mu        sync.Mutex
 }
 
+type selectionState struct {
+	subGroups []subGroupItem
+}
+
 // selectNext uses weighted round-robin algorithm to select a sub-group with active keys
-func (s *selector) selectNext() string {
+func (s *selector) selectNext(requestModel string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if len(s.subGroups) == 0 {
+	candidates := s.finalCandidates(requestModel)
+	if len(candidates) == 0 {
 		return ""
 	}
 
-	if len(s.subGroups) == 1 {
-		if s.hasActiveKeys(s.subGroups[0].subGroupID) {
-			return s.subGroups[0].name
+	state := s.getState(candidates)
+	if len(state.subGroups) == 1 {
+		if s.hasActiveKeys(state.subGroups[0].subGroupID) {
+			return state.subGroups[0].name
 		}
 		logrus.WithFields(logrus.Fields{
-			"group_id":   s.subGroups[0].subGroupID,
-			"group_name": s.subGroups[0].name,
+			"group_id":   state.subGroups[0].subGroupID,
+			"group_name": state.subGroups[0].name,
 		}).Debug("Single sub-group has no active keys")
 		return ""
 	}
 
 	attempted := make(map[uint]bool)
-	for len(attempted) < len(s.subGroups) {
-		item := s.selectByWeight()
+	for len(attempted) < len(state.subGroups) {
+		item := state.selectByWeight()
 		if item == nil {
 			break
 		}
@@ -191,14 +203,55 @@ func (s *selector) selectNext() string {
 
 	logrus.WithFields(logrus.Fields{
 		"aggregate_group":  s.groupName,
-		"total_sub_groups": len(s.subGroups),
+		"total_sub_groups": len(state.subGroups),
 	}).Warn("No sub-groups with active keys available")
 
 	return ""
 }
 
-// selectByWeight implements smooth weighted round-robin algorithm
-func (s *selector) selectByWeight() *subGroupItem {
+func (s *selector) finalCandidates(requestModel string) []subGroupItem {
+	routeMatched := false
+	if requestModel != "" {
+		for _, item := range s.subGroups {
+			if containsModel(item.routeModels, requestModel) {
+				routeMatched = true
+				break
+			}
+		}
+	}
+
+	candidates := make([]subGroupItem, 0, len(s.subGroups))
+	for _, item := range s.subGroups {
+		if routeMatched {
+			if !containsModel(item.routeModels, requestModel) {
+				continue
+			}
+		} else if len(item.routeModels) > 0 {
+			continue
+		}
+		if item.weight <= 0 {
+			continue
+		}
+		candidates = append(candidates, item)
+	}
+	return candidates
+}
+
+func (s *selector) getState(candidates []subGroupItem) *selectionState {
+	key := candidateSetKey(candidates)
+	if state, exists := s.states[key]; exists {
+		return state
+	}
+
+	items := make([]subGroupItem, len(candidates))
+	copy(items, candidates)
+	state := &selectionState{subGroups: items}
+	s.states[key] = state
+	return state
+}
+
+// selectByWeight implements smooth weighted round-robin algorithm.
+func (s *selectionState) selectByWeight() *subGroupItem {
 	totalWeight := 0
 	var best *subGroupItem
 
@@ -212,12 +265,41 @@ func (s *selector) selectByWeight() *subGroupItem {
 		}
 	}
 
-	if best == nil {
-		return &s.subGroups[0]
+	if best == nil || totalWeight <= 0 {
+		return nil
 	}
 
 	best.currentWeight -= totalWeight
 	return best
+}
+
+func modelSet(values []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		set[value] = struct{}{}
+	}
+	return set
+}
+
+func containsModel(configuredModels map[string]struct{}, requestModel string) bool {
+	_, exists := configuredModels[requestModel]
+	return exists
+}
+
+func candidateSetKey(candidates []subGroupItem) string {
+	ids := make([]uint, 0, len(candidates))
+	for _, candidate := range candidates {
+		ids = append(ids, candidate.subGroupID)
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		return ids[i] < ids[j]
+	})
+
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = strconv.FormatUint(uint64(id), 10)
+	}
+	return strings.Join(parts, ",")
 }
 
 // hasActiveKeys checks if a sub-group has available API keys

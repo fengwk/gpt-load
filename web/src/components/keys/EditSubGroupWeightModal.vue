@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { keysApi } from "@/api/keys";
+import StringListInput from "@/components/common/StringListInput.vue";
 import type { Group, SubGroupInfo } from "@/types/models";
 import { Close } from "@vicons/ionicons5";
 import {
@@ -39,8 +40,10 @@ const formRef = ref();
 // 表单数据
 const formData = reactive<{
   weight: number;
+  route_models: string[];
 }>({
   weight: 0,
+  route_models: [],
 });
 
 // 预览新的权重百分比（假设其他子分组权重不变）
@@ -87,6 +90,7 @@ watch(
   ([show, subGroup]) => {
     if (show && subGroup) {
       formData.weight = subGroup.weight;
+      formData.route_models = [...(subGroup.route_models || [])];
     }
   },
   { immediate: true }
@@ -119,11 +123,10 @@ async function handleSubmit() {
       return;
     }
 
-    await keysApi.updateSubGroupWeight(
-      props.aggregateGroup.id,
-      subGroupId,
-      formData.weight // 保持原始数值，不进行取整
-    );
+    await keysApi.updateSubGroup(props.aggregateGroup.id, subGroupId, {
+      weight: formData.weight,
+      route_models: formData.route_models,
+    });
 
     // 后端已经通过API响应显示成功消息，这里不需要重复显示
     emit("success");
@@ -144,7 +147,7 @@ function adjustWeight(delta: number) {
   <n-modal :show="show" @update:show="handleClose" class="edit-weight-modal">
     <n-card
       class="edit-weight-card"
-      :title="t('keys.editWeight')"
+      :title="t('keys.editSubGroupConfig')"
       :bordered="false"
       size="huge"
       role="dialog"
@@ -224,6 +227,16 @@ function adjustWeight(delta: number) {
             <div class="preview-note">
               {{ t("keys.weightPreviewNote") }}
             </div>
+          </div>
+
+          <div class="model-rules">
+            <n-form-item :label="t('keys.routeModels')" :show-feedback="false">
+              <string-list-input
+                v-model="formData.route_models"
+                :placeholder="t('keys.routeModelsPlaceholder')"
+                :add-text="t('keys.addModel')"
+              />
+            </n-form-item>
           </div>
         </div>
       </n-form>
@@ -328,6 +341,17 @@ function adjustWeight(delta: number) {
   font-size: 0.85rem;
   color: var(--text-tertiary);
   font-style: italic;
+}
+
+.model-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.model-rules :deep(.n-form-item) {
+  margin-bottom: 0;
 }
 
 /* 响应式适配 */

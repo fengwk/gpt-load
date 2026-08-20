@@ -127,6 +127,9 @@ export default {
     selectChannelTypeFirst: "先にチャンネルタイプを選択してください",
     channelTypeChanged: "チャンネルタイプが変更され、サブグループ設定がクリアされました",
     duplicateSubGroup: "同じサブグループを2回選択することはできません",
+    routeModels: "ルートモデル",
+    routeModelsPlaceholder: "完全一致するモデル名を入力",
+    addModel: "モデルを追加",
     weightZeroTip: "ウェイト0は一時的に無効を意味します",
     disabled: "無効",
     groupNamePlaceholder: "例：openai-pool",
@@ -253,6 +256,7 @@ export default {
     disabledSubGroups: "無効化されたサブグループ",
     unavailableSubGroups: "利用不可のサブグループ",
     editWeight: "ウェイトを編集",
+    editSubGroupConfig: "サブグループ設定を編集",
     deleteSubGroup: "サブグループを削除",
     confirmDeleteSubGroup: 'サブグループ "{name}" を削除してもよろしいですか？',
     deleteSubGroupSuccess: "サブグループを正常に削除しました",
@@ -444,6 +448,7 @@ export default {
     confirmRemoveSubGroup:
       'アグリゲートグループからサブグループ "{name}" を削除してもよろしいですか？',
     editWeight: "重みを編集",
+    editConfig: "サブグループ設定を編集",
     weight: "重み",
     remove: "削除",
     viewGroupInfo: "グループ情報を表示",
@@ -451,6 +456,7 @@ export default {
     statusActive: "有効",
     statusDisabled: "無効",
     statusUnavailable: "利用不可",
+    routeModels: "ルートモデル",
   },
   logs: {
     title: "ログ",

@@ -49,10 +49,12 @@ func (gm *GroupManager) Initialize() error {
 			return nil, fmt.Errorf("failed to load groups from db: %w", err)
 		}
 
-		// Load all sub-group relationships for aggregate groups (only valid ones with weight > 0)
+		// Load all sub-group relationships for aggregate groups. Weight filtering
+		// belongs to the request-time selector so explicit route matches on
+		// weight-zero associations cannot fall back to unrelated sub-groups.
 		var allSubGroups []models.GroupSubGroup
-		if err := gm.db.Where("weight > 0").Find(&allSubGroups).Error; err != nil {
-			return nil, fmt.Errorf("failed to load valid sub groups: %w", err)
+		if err := gm.db.Find(&allSubGroups).Error; err != nil {
+			return nil, fmt.Errorf("failed to load sub groups: %w", err)
 		}
 
 		// Group sub-groups by aggregate group ID

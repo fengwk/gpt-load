@@ -60,14 +60,7 @@ func (ch *OpenAIResponseChannel) IsStreamRequest(c *gin.Context, bodyBytes []byt
 }
 
 func (ch *OpenAIResponseChannel) ExtractModel(c *gin.Context, bodyBytes []byte) string {
-	type modelPayload struct {
-		Model string `json:"model"`
-	}
-	var p modelPayload
-	if err := json.Unmarshal(bodyBytes, &p); err == nil {
-		return p.Model
-	}
-	return ""
+	return ExtractModel("openai-response", c, bodyBytes)
 }
 
 func (ch *OpenAIResponseChannel) ValidateKey(ctx context.Context, apiKey *models.APIKey, group *models.Group) (bool, error) {

@@ -70,8 +70,23 @@ func (ps *ProxyServer) HandleProxy(c *gin.Context) {
 		return
 	}
 
-	// Select sub-group if this is an aggregate group
-	subGroupName, err := ps.subGroupManager.SelectSubGroup(originalGroup)
+	bodyBytes, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		logrus.Errorf("Failed to read request body: %v", err)
+		response.Error(c, app_errors.NewAPIError(app_errors.ErrBadRequest, "Failed to read request body"))
+		return
+	}
+	c.Request.Body.Close()
+
+	// Extract the raw client model only for aggregate routing. Standard groups
+	// keep the existing hot path without an extra JSON parse.
+	requestModel := ""
+	if originalGroup.GroupType == "aggregate" {
+		requestModel = channel.ExtractModel(originalGroup.ChannelType, c, bodyBytes)
+	}
+
+	// Select sub-group if this is an aggregate group.
+	subGroupName, err := ps.subGroupManager.SelectSubGroup(originalGroup, requestModel)
 	if err != nil {
 		logrus.WithFields(logrus.Fields{
 			"aggregate_group": originalGroup.Name,
@@ -95,14 +110,6 @@ func (ps *ProxyServer) HandleProxy(c *gin.Context) {
 		response.Error(c, app_errors.NewAPIError(app_errors.ErrInternalServer, fmt.Sprintf("Failed to get channel for group '%s': %v", groupName, err)))
 		return
 	}
-
-	bodyBytes, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		logrus.Errorf("Failed to read request body: %v", err)
-		response.Error(c, app_errors.NewAPIError(app_errors.ErrBadRequest, "Failed to read request body"))
-		return
-	}
-	c.Request.Body.Close()
 
 	finalBodyBytes, err := ps.applyParamOverrides(bodyBytes, group)
 	if err != nil {

@@ -51,12 +51,13 @@ type HeaderRule struct {
 
 // GroupSubGroup 聚合分组和子分组的关联表
 type GroupSubGroup struct {
-	ID         uint      `gorm:"primaryKey;autoIncrement" json:"id"`
-	GroupID    uint      `gorm:"not null;uniqueIndex:idx_group_sub" json:"group_id"`
-	SubGroupID uint      `gorm:"not null;uniqueIndex:idx_group_sub" json:"sub_group_id"`
-	Weight     int       `gorm:"default:0" json:"weight"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID          uint           `gorm:"primaryKey;autoIncrement" json:"id"`
+	GroupID     uint           `gorm:"not null;uniqueIndex:idx_group_sub" json:"group_id"`
+	SubGroupID  uint           `gorm:"not null;uniqueIndex:idx_group_sub" json:"sub_group_id"`
+	Weight      int            `gorm:"default:0" json:"weight"`
+	RouteModels datatypes.JSON `gorm:"type:json" json:"route_models"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
 
 	// Lightweight association - only store necessary info for performance
 	SubGroupName string `gorm:"-" json:"sub_group_name,omitempty"`
@@ -64,11 +65,12 @@ type GroupSubGroup struct {
 
 // SubGroupInfo 用于API响应的子分组信息
 type SubGroupInfo struct {
-	Group       Group `json:"group"`
-	Weight      int   `json:"weight"`
-	TotalKeys   int64 `json:"total_keys"`
-	ActiveKeys  int64 `json:"active_keys"`
-	InvalidKeys int64 `json:"invalid_keys"`
+	Group       Group    `json:"group"`
+	Weight      int      `json:"weight"`
+	RouteModels []string `json:"route_models"`
+	TotalKeys   int64    `json:"total_keys"`
+	ActiveKeys  int64    `json:"active_keys"`
+	InvalidKeys int64    `json:"invalid_keys"`
 }
 
 // ParentAggregateGroupInfo 用于API响应的父聚合分组信息

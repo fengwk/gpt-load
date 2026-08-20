@@ -438,6 +438,13 @@ type UpdateSubGroupWeightRequest struct {
 	Weight int `json:"weight"`
 }
 
+// UpdateSubGroupConfigRequest defines the complete payload for updating a
+// sub-group association.
+type UpdateSubGroupConfigRequest struct {
+	Weight      int      `json:"weight"`
+	RouteModels []string `json:"route_models"`
+}
+
 // GetSubGroups handles getting sub groups of an aggregate group
 func (s *Server) GetSubGroups(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
@@ -500,6 +507,43 @@ func (s *Server) UpdateSubGroupWeight(c *gin.Context) {
 	}
 
 	response.SuccessI18n(c, "success.sub_group_weight_updated", nil)
+}
+
+// UpdateSubGroupConfig handles updating a sub-group association's weight and
+// model routing rules.
+func (s *Server) UpdateSubGroupConfig(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		response.ErrorI18nFromAPIError(c, app_errors.ErrBadRequest, "validation.invalid_group_id")
+		return
+	}
+
+	subGroupID, err := strconv.Atoi(c.Param("subGroupId"))
+	if err != nil {
+		response.ErrorI18nFromAPIError(c, app_errors.ErrBadRequest, "validation.invalid_sub_group_id")
+		return
+	}
+
+	var req UpdateSubGroupConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, app_errors.NewAPIError(app_errors.ErrInvalidJSON, err.Error()))
+		return
+	}
+
+	err = s.AggregateGroupService.UpdateSubGroupConfig(
+		c.Request.Context(),
+		uint(id),
+		uint(subGroupID),
+		services.SubGroupUpdateInput{
+			Weight:      req.Weight,
+			RouteModels: req.RouteModels,
+		},
+	)
+	if s.handleGroupError(c, err) {
+		return
+	}
+
+	response.SuccessI18n(c, "success.sub_group_updated", nil)
 }
 
 // DeleteSubGroup handles deleting a sub group from an aggregate group

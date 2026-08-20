@@ -63,14 +63,7 @@ func (ch *AnthropicChannel) IsStreamRequest(c *gin.Context, bodyBytes []byte) bo
 }
 
 func (ch *AnthropicChannel) ExtractModel(c *gin.Context, bodyBytes []byte) string {
-	type modelPayload struct {
-		Model string `json:"model"`
-	}
-	var p modelPayload
-	if err := json.Unmarshal(bodyBytes, &p); err == nil {
-		return p.Model
-	}
-	return ""
+	return ExtractModel("anthropic", c, bodyBytes)
 }
 
 // ValidateKey checks if the given API key is valid by making a messages request.

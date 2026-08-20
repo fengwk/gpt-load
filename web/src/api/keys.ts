@@ -6,6 +6,9 @@ import type {
   GroupStatsResponse,
   KeyStatus,
   ParentAggregateGroup,
+  SubGroupConfig,
+  SubGroupInfo,
+  SubGroupUpdateConfig,
   TaskInfo,
 } from "@/types/models";
 import http from "@/utils/http";
@@ -280,16 +283,13 @@ export const keysApi = {
   },
 
   // 获取聚合分组的子分组列表
-  async getSubGroups(aggregateGroupId: number): Promise<import("@/types/models").SubGroupInfo[]> {
+  async getSubGroups(aggregateGroupId: number): Promise<SubGroupInfo[]> {
     const res = await http.get(`/groups/${aggregateGroupId}/sub-groups`);
     return res.data || [];
   },
 
   // 为聚合分组添加子分组
-  async addSubGroups(
-    aggregateGroupId: number,
-    subGroups: { group_id: number; weight: number }[]
-  ): Promise<void> {
+  async addSubGroups(aggregateGroupId: number, subGroups: SubGroupConfig[]): Promise<void> {
     await http.post(`/groups/${aggregateGroupId}/sub-groups`, {
       sub_groups: subGroups,
     });
@@ -304,6 +304,15 @@ export const keysApi = {
     await http.put(`/groups/${aggregateGroupId}/sub-groups/${subGroupId}/weight`, {
       weight,
     });
+  },
+
+  // 更新子分组完整配置
+  async updateSubGroup(
+    aggregateGroupId: number,
+    subGroupId: number,
+    config: SubGroupUpdateConfig
+  ): Promise<void> {
+    await http.put(`/groups/${aggregateGroupId}/sub-groups/${subGroupId}`, config);
   },
 
   // 删除子分组

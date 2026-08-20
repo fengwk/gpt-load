@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { keysApi } from "@/api/keys";
-import type { Group, SubGroupInfo } from "@/types/models";
+import StringListInput from "@/components/common/StringListInput.vue";
+import type { Group, SubGroupConfig, SubGroupInfo } from "@/types/models";
 import { getGroupDisplayName } from "@/utils/display";
 import { Add, Close } from "@vicons/ionicons5";
 import {
@@ -33,6 +34,7 @@ interface Emits {
 interface SubGroupItem {
   group_id: number | null;
   weight: number;
+  route_models: string[];
 }
 
 const props = defineProps<Props>();
@@ -47,7 +49,7 @@ const formRef = ref();
 const formData = reactive<{
   sub_groups: SubGroupItem[];
 }>({
-  sub_groups: [{ group_id: null, weight: 1 }],
+  sub_groups: [{ group_id: null, weight: 1, route_models: [] }],
 });
 
 // 计算可用的分组选项（排除已添加的）
@@ -156,12 +158,12 @@ watch(
 
 // 重置表单
 function resetForm() {
-  formData.sub_groups = [{ group_id: null, weight: 1 }];
+  formData.sub_groups = [{ group_id: null, weight: 1, route_models: [] }];
 }
 
 // 添加子分组项
 function addSubGroupItem() {
-  formData.sub_groups.push({ group_id: null, weight: 1 });
+  formData.sub_groups.push({ group_id: null, weight: 1, route_models: [] });
 }
 
 // 删除子分组项
@@ -194,10 +196,13 @@ async function handleSubmit() {
       return;
     }
 
-    await keysApi.addSubGroups(
-      props.aggregateGroup.id,
-      validSubGroups as { group_id: number; weight: number }[]
-    );
+    const subGroupConfigs: SubGroupConfig[] = validSubGroups.map(subGroup => ({
+      group_id: subGroup.group_id as number,
+      weight: subGroup.weight,
+      route_models: subGroup.route_models,
+    }));
+
+    await keysApi.addSubGroups(props.aggregateGroup.id, subGroupConfigs);
 
     emit("success");
     handleClose();
@@ -247,48 +252,60 @@ const canAddMore = computed(() => {
 
           <div class="sub-groups-list">
             <div v-for="(item, index) in formData.sub_groups" :key="index" class="sub-group-item">
-              <span class="item-label">{{ t("keys.subGroup") }} {{ index + 1 }}</span>
+              <div class="sub-group-main">
+                <span class="item-label">{{ t("keys.subGroup") }} {{ index + 1 }}</span>
 
-              <n-form-item
-                class="item-select"
-                :path="`sub_groups[${index}].group_id`"
-                :show-feedback="false"
-              >
-                <n-select
-                  v-model:value="item.group_id"
-                  :options="getOptionsForItem(index)"
-                  :placeholder="t('keys.selectSubGroup')"
-                  clearable
-                />
-              </n-form-item>
+                <n-form-item
+                  class="item-select"
+                  :path="`sub_groups[${index}].group_id`"
+                  :show-feedback="false"
+                >
+                  <n-select
+                    v-model:value="item.group_id"
+                    :options="getOptionsForItem(index)"
+                    :placeholder="t('keys.selectSubGroup')"
+                    clearable
+                  />
+                </n-form-item>
 
-              <n-form-item
-                class="item-weight"
-                :path="`sub_groups[${index}].weight`"
-                :show-feedback="false"
-              >
-                <n-input-number
-                  v-model:value="item.weight"
-                  :min="0"
-                  :max="1000"
-                  :placeholder="t('keys.enterWeight')"
-                  style="width: 100%"
-                />
-              </n-form-item>
+                <n-form-item
+                  class="item-weight"
+                  :path="`sub_groups[${index}].weight`"
+                  :show-feedback="false"
+                >
+                  <n-input-number
+                    v-model:value="item.weight"
+                    :min="0"
+                    :max="1000"
+                    :placeholder="t('keys.enterWeight')"
+                    style="width: 100%"
+                  />
+                </n-form-item>
 
-              <n-button
-                @click="removeSubGroupItem(index)"
-                type="error"
-                quaternary
-                circle
-                size="small"
-                class="item-delete"
-                :style="{ visibility: formData.sub_groups.length > 1 ? 'visible' : 'hidden' }"
-              >
-                <template #icon>
-                  <n-icon :component="Close" />
-                </template>
-              </n-button>
+                <n-button
+                  @click="removeSubGroupItem(index)"
+                  type="error"
+                  quaternary
+                  circle
+                  size="small"
+                  class="item-delete"
+                  :style="{ visibility: formData.sub_groups.length > 1 ? 'visible' : 'hidden' }"
+                >
+                  <template #icon>
+                    <n-icon :component="Close" />
+                  </template>
+                </n-button>
+              </div>
+
+              <div class="model-rules">
+                <n-form-item :label="t('keys.routeModels')" :show-feedback="false">
+                  <string-list-input
+                    v-model="item.route_models"
+                    :placeholder="t('keys.routeModelsPlaceholder')"
+                    :add-text="t('keys.addModel')"
+                  />
+                </n-form-item>
+              </div>
             </div>
           </div>
 
@@ -352,12 +369,20 @@ const canAddMore = computed(() => {
 
 .sub-group-item {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: 12px;
   padding: 12px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-md);
+}
+
+.sub-group-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
 }
 
 .item-label {
@@ -382,6 +407,16 @@ const canAddMore = computed(() => {
   flex-shrink: 0;
 }
 
+.model-rules {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.model-rules :deep(.n-form-item) {
+  margin-bottom: 0;
+}
+
 .add-item-section {
   margin-top: 16px;
 }
@@ -401,9 +436,8 @@ const canAddMore = computed(() => {
     width: 90vw;
   }
 
-  .sub-group-item {
-    flex-direction: column;
-    align-items: stretch;
+  .sub-group-main {
+    flex-wrap: wrap;
     gap: 8px;
   }
 
